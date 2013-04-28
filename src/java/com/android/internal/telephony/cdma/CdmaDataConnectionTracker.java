@@ -216,7 +216,7 @@ public final class CdmaDataConnectionTracker extends DataConnectionTracker {
         }
 
         int psState = mCdmaPhone.mSST.getCurrentDataConnectionState();
-        boolean roaming = (mPhone.getServiceState().getRoaming() && !getDataOnRoamingEnabled());
+        boolean roaming = (((android.privacy.surrogate.PrivacyCDMAPhone)mPhone).getSafeState().getRoaming() && !getDataOnRoamingEnabled());
         boolean desiredPowerState = mCdmaPhone.mSST.getDesiredPowerState();
         boolean subscriptionFromNv = (mCdmaSSM.getCdmaSubscriptionSource()
                                        == CdmaSubscriptionSourceManager.SUBSCRIPTION_FROM_NV);
@@ -283,7 +283,7 @@ public final class CdmaDataConnectionTracker extends DataConnectionTracker {
         }
 
         int psState = mCdmaPhone.mSST.getCurrentDataConnectionState();
-        boolean roaming = mPhone.getServiceState().getRoaming();
+        boolean roaming = ((android.privacy.surrogate.PrivacyCDMAPhone)mPhone).getSafeState().getRoaming();
         boolean desiredPowerState = mCdmaPhone.mSST.getDesiredPowerState();
 
         if ((mState == DctConstants.State.IDLE || mState == DctConstants.State.SCANNING) &&

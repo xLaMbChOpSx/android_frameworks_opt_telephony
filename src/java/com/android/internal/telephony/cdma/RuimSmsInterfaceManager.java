@@ -22,17 +22,27 @@ import android.os.AsyncResult;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
-
 import com.android.internal.telephony.IccConstants;
 import com.android.internal.telephony.IccSmsInterfaceManager;
 import com.android.internal.telephony.IccUtils;
 import com.android.internal.telephony.PhoneProxy;
 import com.android.internal.telephony.SMSDispatcher;
 import com.android.internal.telephony.SmsRawData;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+
+
+/////////////////////////////////////////////////////////////
+import android.content.pm.PackageManager;
+import android.os.Binder;
+import android.os.ServiceManager;
+import android.privacy.IPrivacySettingsManager;
+import android.privacy.PrivacySettings;
+import android.privacy.PrivacySettingsManager;
+import android.privacy.utilities.PrivacyDebugger;
+/////////////////////////////////////////////////////////////
+
 
 import static android.telephony.SmsManager.STATUS_ON_ICC_FREE;
 
@@ -51,6 +61,172 @@ public class RuimSmsInterfaceManager extends IccSmsInterfaceManager {
     private static final int EVENT_LOAD_DONE = 1;
     private static final int EVENT_UPDATE_DONE = 2;
 
+    //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+    
+    protected PrivacySettingsManager pSetMan;
+    
+    protected static final String P_TAG = "PrivacySMSInterfaceManager";
+    
+    protected static final int ACCESS_TYPE_SMS_MMS = 0;
+	protected static final int ACCESS_TYPE_ICC = 1;
+    
+    //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+    
+	//-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+    /**
+     * Gives the actual package names which are trying to send sms
+     * {@hide}
+     * @return package name array or null
+     */
+	protected String[] getPackageName(){
+		 PackageManager pm = mContext.getPackageManager();
+	     String[] packageNames = pm.getPackagesForUid(Binder.getCallingUid());
+	     return packageNames;
+	}
+    
+	/**
+     * This method also includes notifications!
+     * @param packageNames 
+     * @param accessType use constants ACCESS_TYPE_SMS_MMS and ACCESS_TYPE_ICC
+     * @return true if package is allowed or exception was thrown or packages are empty, false if package is not allowed 
+     * {@hide}
+     */
+    protected boolean isAllowed(String[] packageNames, int accessType){
+    	try{
+    		switch(accessType){
+    			case ACCESS_TYPE_SMS_MMS:
+    				PrivacySettings settings = null;
+    	        	if(pSetMan == null) pSetMan = new PrivacySettingsManager(null, IPrivacySettingsManager.Stub.asInterface(ServiceManager.getService("privacy")));
+    	        	if(pSetMan != null && packageNames != null){
+    	        		for(int i=0; i < packageNames.length; i++){
+    	            		settings = pSetMan.getSettings(packageNames[i]);
+    	            		if(pSetMan != null && settings != null && settings.getSmsSendSetting() != PrivacySettings.REAL){
+    	            			if(settings.isDefaultDenyObject())
+    	            				notify(accessType, packageNames[i], PrivacySettings.ERROR);
+    	            			else
+    	            				notify(accessType, packageNames[i],PrivacySettings.EMPTY);
+    	            			return false;
+    	            		}
+    	            		settings = null;
+    	            	}
+    	        		notify(accessType, packageNames[0], PrivacySettings.REAL);
+    	        		return true;
+    	        	}
+    	        	else{
+    	        		PrivacyDebugger.e(P_TAG,"isAllowed - can't parse permissions because packages or pSetMan is null -> handle default deny mode!");
+    	        		switch(PrivacySettings.CURRENT_DEFAULT_DENY_MODE) {
+    	        			case PrivacySettings.DEFAULT_DENY_EMPTY:
+    	        			case PrivacySettings.DEFAULT_DENY_RANDOM:
+    	        				PrivacyDebugger.w(P_TAG, "isAllowed - default deny mode is random or empty, handle it! output: false");
+    	        				notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+    	        				return false;
+    	        			case PrivacySettings.DEFAULT_DENY_REAL:
+    	        				PrivacyDebugger.w(P_TAG, "isAllowed - default deny mode is real, handle it! output: true");
+    	        				notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+    	        				return true;
+    	        			default://this normally not happens
+    	        				PrivacyDebugger.e(P_TAG, "isAllowed - wrong parameters set for default deny mode, implementation failure?!");
+    	        				notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+    	        				return true;
+    	        		}
+    	        	}
+    			case ACCESS_TYPE_ICC:
+    				if(pSetMan == null) pSetMan = new PrivacySettingsManager(null, IPrivacySettingsManager.Stub.asInterface(ServiceManager.getService("privacy")));
+    	        	if(pSetMan != null && packageNames != null){
+    	        		for(int i=0; i < packageNames.length; i++){
+    	            		settings = pSetMan.getSettings(packageNames[i]);
+    	            		if(pSetMan != null && settings != null && settings.getIccAccessSetting() != PrivacySettings.REAL){
+    	            			if(settings.isDefaultDenyObject())
+    	            				notify(accessType, packageNames[i],PrivacySettings.ERROR);
+    	            			else
+    	            				notify(accessType, packageNames[i],PrivacySettings.EMPTY);
+    	            			return false;
+    	            		}
+    	            		settings = null;
+    	            	}
+    	        		notify(accessType, packageNames[0],PrivacySettings.REAL);
+    	        		return true;
+    	        	}
+    	        	else{
+    	        		PrivacyDebugger.e(P_TAG,"isAllowed - can't parse permissions because packages or pSetMan is null -> handle default deny mode!");
+    	        		switch(PrivacySettings.CURRENT_DEFAULT_DENY_MODE) {
+    	        			case PrivacySettings.DEFAULT_DENY_EMPTY:
+    	        			case PrivacySettings.DEFAULT_DENY_RANDOM:
+    	        				PrivacyDebugger.w(P_TAG, "isAllowed - default deny mode is random or empty, handle it! output: false");
+    	        				notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+    	        				return false;
+    	        			case PrivacySettings.DEFAULT_DENY_REAL:
+    	        				PrivacyDebugger.w(P_TAG, "isAllowed - default deny mode is real, handle it! output: true");
+    	        				notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+    	        				return true;
+    	        			default://this normally not happens
+    	        				PrivacyDebugger.e(P_TAG, "isAllowed - wrong parameters set for default deny mode, implementation failure?!");
+    	        				notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+    	        				return true;
+    	        		}
+    	        	}
+    	        default:
+    	        	PrivacyDebugger.e(P_TAG, "isAllowed - passed wrong parameter, implementation failure?!");
+    	        	notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+    	        	return true;
+    		}
+    	}
+    	catch(Exception e){
+    		PrivacyDebugger.e(P_TAG,"isAllowed - Got exception while checking for sms or ICC acess permission", e);
+    		PrivacyDebugger.e(P_TAG, "isAllowed - now handle default deny mode!");
+    		switch(PrivacySettings.CURRENT_DEFAULT_DENY_MODE) {
+				case PrivacySettings.DEFAULT_DENY_EMPTY:
+				case PrivacySettings.DEFAULT_DENY_RANDOM:
+					PrivacyDebugger.w(P_TAG, "isAllowed - default deny mode is random or empty, handle it! output: false");
+					notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+					return false;
+				case PrivacySettings.DEFAULT_DENY_REAL:
+					PrivacyDebugger.w(P_TAG, "isAllowed - default deny mode is real, handle it! output: true");
+					notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+					return true;
+				default: //this normally not happens
+					PrivacyDebugger.e(P_TAG, "isAllowed - wrong parameters set for default deny mode, implementation failure?!");
+					notify(accessType, "UNKNOWN", PrivacySettings.ERROR);
+					return true;
+    		}
+    		
+    	}
+    }
+    
+    /**
+     * {@hide}
+     * Helper method for method isAllowed() to show dataAccess toasts
+     * @param accessType use ACCESS_TYPE_SMS_MMS or ACCESS_TYPE_ICC
+     * @param packageName the package name
+     * @param accessMode PrivacySettings.REAL || PrivacySettings.CUSTOM || PrivacySettings.RANDOM || PrivacySettings.EMPTY
+     */
+    protected void notify(int accessType,String packageName, byte accessMode){
+    	switch(accessType){
+    		case ACCESS_TYPE_SMS_MMS:
+    			//Log.i("PrivacySmsManager","now send notify information outgoing sms");
+    			if (accessMode != PrivacySettings.REAL) {
+    				PrivacyDebugger.i(P_TAG,"ALLOWED package sending sms");
+    			} else if(accessMode == PrivacySettings.ERROR){
+    				PrivacyDebugger.i(P_TAG,"ERROR package sending sms (default deny mode)");
+    			} else
+    				PrivacyDebugger.i(P_TAG,"BLOCKED package sending sms");
+    			pSetMan.notification(packageName, 0, accessMode, PrivacySettings.DATA_SMS_SEND, null, null);
+    			break;
+    		case ACCESS_TYPE_ICC:
+    			//Log.i("PrivacySmsManager","now send notify information ICC ACCESS");
+    			if (accessMode != PrivacySettings.REAL) {
+    				PrivacyDebugger.i(P_TAG,"ALLOWED package access to ICC");
+    			} else if(accessMode == PrivacySettings.ERROR) {
+    				PrivacyDebugger.i(P_TAG,"ERROR package access to ICC (default deny mode)");
+    			} else
+    				PrivacyDebugger.i(P_TAG,"BLOCKED package access to ICC");
+    			pSetMan.notification(packageName, 0, accessMode, PrivacySettings.DATA_ICC_ACCESS, null, null);
+    			break;
+    	}
+    }
+    
+    //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+    
     Handler mHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
@@ -114,6 +290,13 @@ public class RuimSmsInterfaceManager extends IccSmsInterfaceManager {
         if (DBG) log("updateMessageOnIccEf: index=" + index +
                 " status=" + status + " ==> " +
                 "("+ pdu + ")");
+        
+        //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+        if(!isAllowed(getPackageName(),ACCESS_TYPE_ICC)){
+        	return false;
+        }
+        //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+        
         enforceReceiveAndSend("Updating message on RUIM");
         synchronized(mLock) {
             mSuccess = false;
@@ -150,6 +333,13 @@ public class RuimSmsInterfaceManager extends IccSmsInterfaceManager {
         //NOTE smsc not used in RUIM
         if (DBG) log("copyMessageToIccEf: status=" + status + " ==> " +
                 "pdu=("+ Arrays.toString(pdu) + ")");
+        
+        //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+        if(!isAllowed(getPackageName(),ACCESS_TYPE_ICC)){
+        	return false;
+        }
+        //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+        
         enforceReceiveAndSend("Copying message to RUIM");
         synchronized(mLock) {
             mSuccess = false;
@@ -173,6 +363,12 @@ public class RuimSmsInterfaceManager extends IccSmsInterfaceManager {
     public List<SmsRawData> getAllMessagesFromIccEf() {
         if (DBG) log("getAllMessagesFromEF");
 
+        //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+        if(!isAllowed(getPackageName(),ACCESS_TYPE_ICC)){
+        	return new ArrayList<SmsRawData>();
+        }
+        //-------------------------------------------------------------++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------
+        
         Context context = mPhone.getContext();
 
         context.enforceCallingPermission(
@@ -218,5 +414,6 @@ public class RuimSmsInterfaceManager extends IccSmsInterfaceManager {
     protected void log(String msg) {
         Log.d(LOG_TAG, "[RuimSmsInterfaceManager] " + msg);
     }
+    
 }
 

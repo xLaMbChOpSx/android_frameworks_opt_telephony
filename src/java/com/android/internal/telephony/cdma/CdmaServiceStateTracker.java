@@ -68,6 +68,17 @@ import java.util.Date;
 import java.util.List;
 import java.util.TimeZone;
 
+/////////////////////////////////////////////////////////
+import android.os.ServiceManager;
+import android.privacy.IPrivacySettingsManager;
+import android.privacy.PrivacySettings;
+import android.privacy.PrivacySettingsManager;
+import android.privacy.utilities.PrivacyConstants;
+
+import java.util.Random;
+/////////////////////////////////////////////////////////
+
+
 /**
  * {@hide}
  */
@@ -124,6 +135,11 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
     String mSavedTimeZone;
     long mSavedTime;
     long mSavedAtTime;
+    
+    //-------------------------------------------------------------------------------------------------------------------------------------------------
+    private Context mContext;
+    private PrivacySettingsManager pSetMan;
+    //-------------------------------------------------------------------------------------------------------------------------------------------------
 
     /** Wake lock used while setting time of day. */
     private PowerManager.WakeLock mWakeLock;
@@ -171,7 +187,14 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
 
     protected CdmaServiceStateTracker(CDMAPhone phone, CellInfo cellInfo) {
         super(phone, phone.mCM, cellInfo);
-
+        
+        
+        //-------------------------------------------------------------------------------------------------------------------------------------------------
+        this.mContext = phone.getContext();
+        pSetMan = new PrivacySettingsManager(mContext, IPrivacySettingsManager.Stub.asInterface(ServiceManager.getService("privacy")));
+        //-------------------------------------------------------------------------------------------------------------------------------------------------
+        
+        
         this.phone = phone;
         cr = phone.getContext().getContentResolver();
         cellLoc = new CdmaCellLocation();
@@ -206,6 +229,7 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             Settings.System.getUriFor(Settings.System.AUTO_TIME_ZONE), true,
             mAutoTimeZoneObserver);
         setSignalStrengthDefaultValues();
+
     }
 
     @Override
@@ -374,10 +398,20 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
                         loge("error parsing cell location data: " + ex);
                     }
                 }
-
-                cellLoc.setCellLocationData(baseStationId, baseStationLatitude,
-                        baseStationLongitude, systemId, networkId);
+                //----------------------------------------------------------------------------------------------------------------------------------------------------------
+                PrivacySettings settings = pSetMan.getSettings(mContext.getPackageName(), 0);
+                if(pSetMan != null && settings != null && settings.getLocationNetworkSetting() != PrivacySettings.REAL){
+                	cellLoc.setCellLocationData(PrivacyConstants.CDMA.getCdmaBaseStationId(), 
+					                			PrivacyConstants.CDMA.getCdmaRandomLat(), 
+					                			PrivacyConstants.CDMA.getCdmaRandomLon(),
+					                			PrivacyConstants.CDMA.getCdmaSystemId(),
+					                			PrivacyConstants.CDMA.getCdmaNetworkId());
+                }
+                else{
+                	cellLoc.setCellLocationData(baseStationId, baseStationLatitude, baseStationLongitude, systemId, networkId);
+                }
                 phone.notifyLocationChanged();
+                //----------------------------------------------------------------------------------------------------------------------------------------------------------
             }
 
             // Release any temporary cell lock, which could have been
@@ -572,6 +606,7 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
     protected void handlePollStateResultMessage(int what, AsyncResult ar){
         int ints[];
         String states[];
+  	PrivacySettings settings = pSetMan.getSettings(mContext.getPackageName(), 0);
         switch (what) {
         case EVENT_POLL_STATE_REGISTRATION_CDMA: // Handle RIL_REQUEST_REGISTRATION_STATE.
             states = (String[])ar.result;
@@ -659,10 +694,17 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             mIsInPrl = (systemIsInPrl == 0) ? false : true;
             mDefaultRoamingIndicator = defaultRoamingIndicator;
 
-
-            // Values are -1 if not available.
-            newCellLoc.setCellLocationData(baseStationId, baseStationLatitude,
-                    baseStationLongitude, systemId, networkId);
+            //-------------------------------------------------------------------------------------------------------------------------------------------------------------
+            if(pSetMan != null && settings != null && settings.getLocationNetworkSetting() != PrivacySettings.REAL){
+            	newCellLoc.setCellLocationData(	PrivacyConstants.CDMA.getCdmaBaseStationId(), 
+						            			PrivacyConstants.CDMA.getCdmaRandomLat(), 
+						            			PrivacyConstants.CDMA.getCdmaRandomLon(),
+						            			PrivacyConstants.CDMA.getCdmaSystemId(),
+						            			PrivacyConstants.CDMA.getCdmaNetworkId());
+            }else {
+            	newCellLoc.setCellLocationData(baseStationId, baseStationLatitude, baseStationLongitude, systemId, networkId);
+            }
+            //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
             if (reasonForDenial == 0) {
                 mRegistrationDeniedReason = ServiceStateTracker.REGISTRATION_DENIED_GEN;
@@ -693,14 +735,25 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
                                 "'= " + opNames[2]);
                     }
                 }
-
+                //-----------------------------------------------------------------------------------------------------------------------------------------------------
                 if (!isSubscriptionFromRuim) {
                     // In CDMA in case on NV, the ss.mOperatorAlphaLong is set later with the
                     // ERI text, so here it is ignored what is coming from the modem.
-                    newSS.setOperatorName(null, opNames[1], opNames[2]);
+                	if(pSetMan != null && settings != null && settings.getNetworkInfoSetting() != PrivacySettings.REAL){
+                		newSS.setOperatorName(null, "", "");
+                	}
+                	else{
+                		newSS.setOperatorName(null, opNames[1], opNames[2]);
+                	}
                 } else {
-                    newSS.setOperatorName(opNames[0], opNames[1], opNames[2]);
+                	if(pSetMan != null && settings != null && settings.getNetworkInfoSetting() != PrivacySettings.REAL){
+                		newSS.setOperatorName("", "", "");
+                	}
+                	else{
+                		newSS.setOperatorName(opNames[0], opNames[1], opNames[2]);
+                	}
                 }
+                //-----------------------------------------------------------------------------------------------------------------------------------------------------
             } else {
                 if (DBG) log("EVENT_POLL_STATE_OPERATOR_CDMA: error parsing opNames");
             }
@@ -1001,15 +1054,30 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             if ((cm.getRadioState().isOn()) && (!isSubscriptionFromRuim)) {
                 String eriText;
                 // Now the CDMAPhone sees the new ServiceState so it can get the new ERI text
-                if (ss.getState() == ServiceState.STATE_IN_SERVICE) {
-                    eriText = phone.getCdmaEriText();
-                } else {
-                    // Note that ServiceState.STATE_OUT_OF_SERVICE is valid used for
-                    // mRegistrationState 0,2,3 and 4
-                    eriText = phone.getContext().getText(
-                            com.android.internal.R.string.roamingTextSearching).toString();
+                //---------------------------------------------------------------------------------------------------------------------------------------------------------
+                PrivacySettings settings = pSetMan.getSettings(mContext.getPackageName(), 0);
+                if(pSetMan != null && settings != null && settings.getNetworkInfoSetting() != PrivacySettings.REAL){
+                	if (ss.getState() == ServiceState.STATE_IN_SERVICE) {
+                        eriText = "Protected by PDroid2.0";
+                    } else {
+                        // Note that ServiceState.STATE_OUT_OF_SERVICE is valid used for
+                        // mRegistrationState 0,2,3 and 4
+                        eriText = phone.getContext().getText(
+                                com.android.internal.R.string.roamingTextSearching).toString();
+                    }
+                } else{
+                	//original code
+                	if (ss.getState() == ServiceState.STATE_IN_SERVICE) {
+                        eriText = phone.getCdmaEriText();
+                    } else {
+                        // Note that ServiceState.STATE_OUT_OF_SERVICE is valid used for
+                        // mRegistrationState 0,2,3 and 4
+                        eriText = phone.getContext().getText(
+                                com.android.internal.R.string.roamingTextSearching).toString();
+                    }
                 }
                 ss.setOperatorAlphaLong(eriText);
+                //---------------------------------------------------------------------------------------------------------------------------------------------------------
             }
 
             String operatorNumeric;

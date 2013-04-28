@@ -638,7 +638,7 @@ public final class GsmDataConnectionTracker extends DataConnectionTracker {
                     (mPhone.getState() == PhoneConstants.State.IDLE ||
                      mPhone.getServiceStateTracker().isConcurrentVoiceAndDataAllowed()) &&
                     internalDataEnabled &&
-                    (!mPhone.getServiceState().getRoaming() || getDataOnRoamingEnabled()) &&
+                    (!((android.privacy.surrogate.PrivacyGSMPhone)mPhone).getSafeState().getRoaming() || getDataOnRoamingEnabled()) &&
                     !mIsPsRestricted &&
                     desiredPowerState;
         if (!allowed && DBG) {
@@ -653,7 +653,7 @@ public final class GsmDataConnectionTracker extends DataConnectionTracker {
                 reason += " - Concurrent voice and data not allowed";
             }
             if (!internalDataEnabled) reason += " - mInternalDataEnabled= false";
-            if (mPhone.getServiceState().getRoaming() && !getDataOnRoamingEnabled()) {
+            if (((android.privacy.surrogate.PrivacyGSMPhone)mPhone).getSafeState().getRoaming() && !getDataOnRoamingEnabled()) {
                 reason += " - Roaming and data roaming not enabled";
             }
             if (mIsPsRestricted) reason += " - mIsPsRestricted= true";
@@ -2182,7 +2182,8 @@ public final class GsmDataConnectionTracker extends DataConnectionTracker {
 
         IccRecords r = mIccRecords.get();
         String operator = (r != null) ? r.getOperatorNumeric() : "";
-        int radioTech = mPhone.getServiceState().getRilRadioTechnology();
+        //int radioTech = mPhone.getServiceState().getRilRadioTechnology();
+        int radioTech = ((android.privacy.surrogate.PrivacyGSMPhone)mPhone).getSafeState().getRilRadioTechnology();
 
         // This is a workaround for a bug (7305641) where we don't failover to other
         // suitable APNs if our preferred APN fails.  On prepaid ATT sims we need to

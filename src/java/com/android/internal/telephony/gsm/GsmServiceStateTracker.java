@@ -53,6 +53,7 @@ import android.os.Message;
 import android.os.PowerManager;
 import android.os.Registrant;
 import android.os.RegistrantList;
+
 import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.UserHandle;
@@ -67,7 +68,6 @@ import android.text.TextUtils;
 import android.util.EventLog;
 import android.util.Log;
 import android.util.TimeUtils;
-
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
 import java.util.ArrayList;
@@ -77,6 +77,16 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.TimeZone;
+
+//////////////////////////////////////////////////////////
+import android.os.ServiceManager;
+import android.privacy.IPrivacySettingsManager;
+import android.privacy.PrivacySettings;
+import android.privacy.PrivacySettingsManager;
+import android.privacy.utilities.PrivacyConstants;
+
+import java.util.Random;
+//////////////////////////////////////////////////////////
 
 /**
  * {@hide}
@@ -89,7 +99,12 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
     GsmCellLocation cellLoc;
     GsmCellLocation newCellLoc;
     int mPreferredNetworkType;
-
+    
+    //--------------------------------------------------------------------------
+    private Context mContext;
+    private PrivacySettingsManager pSetMan;
+    //--------------------------------------------------------------------------
+    
     private int gprsState = ServiceState.STATE_OUT_OF_SERVICE;
     private int newGPRSState = ServiceState.STATE_OUT_OF_SERVICE;
     private int mMaxDataCalls = 1;
@@ -234,7 +249,13 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_LOCALE_CHANGED);
         phone.getContext().registerReceiver(mIntentReceiver, filter);
-
+        
+        //--------------------------------------------------------------------------
+        this.mContext = phone.getContext();
+        pSetMan = new PrivacySettingsManager(mContext, IPrivacySettingsManager.Stub.asInterface(ServiceManager.getService("privacy")));
+        //--------------------------------------------------------------------------
+        
+        
         // Gsm doesn't support OTASP so its not needed
         phone.notifyOtaspChanged(OTASP_NOT_NEEDED);
     }
@@ -342,8 +363,17 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                             Log.w(LOG_TAG, "error parsing location: " + ex);
                         }
                     }
-                    cellLoc.setLacAndCid(lac, cid);
+                    //---------------------------------------------------------------------------------------------------------------------
+                    PrivacySettings settings = pSetMan.getSettings(mContext.getPackageName(), 0);
+                    if(pSetMan != null && settings != null && settings.getLocationNetworkSetting() != PrivacySettings.REAL){
+                    	cellLoc.setLacAndCid(PrivacyConstants.GSM.getLocationAreaCode(), PrivacyConstants.GSM.getCellIdentity());
+                    	cellLoc.setPsc(PrivacyConstants.GSM.getPrimaryScramblingCode());
+                    } else {
+                    	cellLoc.setLacAndCid(lac, cid);
+                    }
                     phone.notifyLocationChanged();
+                    //---------------------------------------------------------------------------------------------------------------------
+                    
                 }
 
                 // Release any temporary cell lock, which could have been
@@ -526,7 +556,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                     "of service, set plmn='" + plmn + "'");
         } else if (ss.getState() == ServiceState.STATE_IN_SERVICE) {
             // In either home or roaming service
-            plmn = ss.getOperatorAlphaLong();
+            plmn = ss.getOperatorAlphaLong(); //we can allow this, because we catched it before
             showPlmn = !TextUtils.isEmpty(plmn) &&
                     ((rule & SIMRecords.SPN_RULE_SHOW_PLMN)
                             == SIMRecords.SPN_RULE_SHOW_PLMN);
@@ -539,10 +569,25 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         // The value of spn/showSpn are same in different scenarios.
         //    EXTRA_SHOW_SPN = depending on IccRecords rule
         //    EXTRA_SPN = spn
-        String spn = (iccRecords != null) ? iccRecords.getServiceProviderName() : "";
+        //String spn = (iccRecords != null) ? iccRecords.getServiceProviderName() : "";
+       
+        String spn;
+    	PrivacySettings settings = pSetMan.getSettings(mContext.getPackageName());
+        //--------------------------------------------------------------------------------------------------------------------------------
+        //this part is needed because we do not changed the IccRecord class
+        if(pSetMan != null && settings != null && settings.getNetworkInfoSetting() != PrivacySettings.REAL){
+        	spn = "Protected by PDroid2.0";
+        }
+        else{
+        	spn = (iccRecords != null) ? iccRecords.getServiceProviderName() : "";
+        }
+        //--------------------------------------------------------------------------------------------------------------------------------
+        
+        
         boolean showSpn = !TextUtils.isEmpty(spn)
                 && ((rule & SIMRecords.SPN_RULE_SHOW_SPN)
                         == SIMRecords.SPN_RULE_SHOW_SPN);
+        
 
         // Update SPN_STRINGS_UPDATED_ACTION IFF any value changes
         if (showPlmn != curShowPlmn
@@ -604,6 +649,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                         ar.exception);
             }
         } else try {
+        	PrivacySettings settings = pSetMan.getSettings(mContext.getPackageName());
             switch (what) {
                 case EVENT_POLL_STATE_REGISTRATION:
                     states = (String[])ar.result;
@@ -642,9 +688,18 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                         mEmergencyOnly = false;
                     }
 
-                    // LAC and CID are -1 if not avail
-                    newCellLoc.setLacAndCid(lac, cid);
-                    newCellLoc.setPsc(psc);
+
+                    //--------------------------------------------------------------------------------------------------------------------------------
+                    if(pSetMan != null && settings != null && settings.getLocationNetworkSetting() != PrivacySettings.REAL){
+                    	newCellLoc.setLacAndCid(PrivacyConstants.GSM.getLocationAreaCode(), PrivacyConstants.GSM.getCellIdentity());
+                    	newCellLoc.setPsc(PrivacyConstants.GSM.getPrimaryScramblingCode());
+                    	
+                    } else{
+                    	newCellLoc.setLacAndCid(lac, cid);
+                        newCellLoc.setPsc(psc);
+                    }
+                    //--------------------------------------------------------------------------------------------------------------------------------
+                    
                 break;
 
                 case EVENT_POLL_STATE_GPRS:
@@ -682,7 +737,14 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
                     String opNames[] = (String[])ar.result;
 
                     if (opNames != null && opNames.length >= 3) {
-                         newSS.setOperatorName (opNames[0], opNames[1], opNames[2]);
+                    	//--------------------------------------------------------------------------------------------------------------------------------
+                        if(pSetMan != null && settings != null && settings.getNetworkInfoSetting() != PrivacySettings.REAL){
+                        	newSS.setOperatorName ("", "", "");
+                        }
+                        else{
+                        	newSS.setOperatorName (opNames[0], opNames[1], opNames[2]);
+                        }
+                        //--------------------------------------------------------------------------------------------------------------------------------
                     }
                 break;
 
@@ -1041,7 +1103,7 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
         }
 
         if (hasLocationChanged) {
-            phone.notifyLocationChanged();
+            phone.notifyLocationChanged(); //we can notify, because all sensitive data has changed before @author CollegeDev
         }
 
         if (! isGprsConsistent(gprsState, ss.getState())) {
